@@ -1,34 +1,33 @@
 using ReinforcementLearning;
 
-namespace RL.Test
+namespace RL.Test;
+
+public class NetworkTests
 {
-    public class NetworkTests
+    [Fact]
+    public void NetworkTest()
     {
-        [Fact]
-        public void NetworkTest()
-        {
-            int[] layerSizes = [2, 3, 2];
+        int[] layerSizes = [2, 3, 2];
 
-            decimal[][][] weights =
+        double[][][] weights =
+        [
             [
-                [
-                    [1, 10, 1],
-                    [1, 1, 1]
-                ],
-                [
-                    [1, 1],
-                    [1, 3],
-                    [1, 2]
-                ]
-            ];
+                [1, 10, 1],
+                [1, 1, 1]
+            ],
+            [
+                [1, 1],
+                [1, 3],
+                [1, 2]
+            ]
+        ];
 
-            var network = new Network(layerSizes, x => x * 2, weights);
+        var network = new Network(layerSizes, x => x * 2, weights);
 
-            var result = network.Propagate([1, 1]);
+        var result = network.Propagate([1, 1]);
             
-            decimal[] expectedOutput = [60, 156];
+        double[] expectedOutput = [60, 156];
 
-            Assert.Equal(expectedOutput, result);
-        }
+        Assert.Equal(expectedOutput, result);
     }
 }
