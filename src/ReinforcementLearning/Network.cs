@@ -3,7 +3,7 @@
 public class Network
 {
     // _nodes[layerIndex][nodeIndex]
-    private readonly Node[][] _nodes;
+    private readonly double[][] _nodes;
 
     // _weights[fromLayerIndex][fromNodeIndex][toNodeIndex]
     private readonly double[][][] _weights;
@@ -19,7 +19,7 @@ public class Network
         _layerSizes = layerSizes;
         _activationFunction = activationFunction;
 
-        _nodes = layerSizes.Select(i => Enumerable.Range(0, i).Select(_ => new Node()).ToArray()).ToArray();
+        _nodes = layerSizes.Select(i => Enumerable.Range(0, i).Select(_ => 0d).ToArray()).ToArray();
 
         if (weights != null)
         {
@@ -72,7 +72,7 @@ public class Network
 
     public Network Copy()
     {
-        return new Network(_layerSizes, _activationFunction, _weights.Select(w => w).ToArray(), _biases.Select(b => b).ToArray());
+        return new (_layerSizes, _activationFunction, _weights.Select(w => w).ToArray(), _biases.Select(b => b).ToArray());
     }
 
     private double Activation(double x) => _activationFunction(x);
@@ -82,7 +82,7 @@ public class Network
         // Feed inputs to input layer
         for (var nodeIndex = 0; nodeIndex < inputs.Length; nodeIndex++)
         {
-            _nodes[0][nodeIndex].Value = inputs[nodeIndex];
+            _nodes[0][nodeIndex] = inputs[nodeIndex];
         }
 
         // For every layer except first and last
@@ -99,25 +99,21 @@ public class Network
                     // Find weight and calculate next layer node's value
                     var weight = _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
                     var bias = _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
-                    nextLayer[nextLayerNodeIndex].Value += (currentLayer[currentLayerNodeIndex].Value * weight) + bias;
+                    nextLayer[nextLayerNodeIndex] += (currentLayer[currentLayerNodeIndex] * weight) + bias;
                 }
             }
 
-            foreach (var node in nextLayer)
+            for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayer.Length; nextLayerNodeIndex++)
             {
-                var preActivationValue = node.Value;
-                node.Value = Activation(preActivationValue);
+                nextLayer[nextLayerNodeIndex] = Activation(nextLayer[nextLayerNodeIndex]);
             }
         }
 
         // Calculate outputs
-        return _nodes
-            .Last()
-            .Select(node => node.Value)
-            .ToArray();
+        return [.. _nodes.Last()];
     }
 
-    public void Mutate()
+    public void Mutate(double probabilityOfMutation)
     {
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
         {
@@ -128,27 +124,18 @@ public class Network
             {
                 for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayerSize; nextLayerNodeIndex++)
                 {
-                    if (Random.Shared.NextDouble() > 0.95)
+                    if (Random.Shared.NextDouble() < probabilityOfMutation)
                     {
-                        var current = _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
-
-                        _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] = Math.Clamp(current * ((2 * Random.Shared.NextDouble()) - 1), -1, 1);
+                        _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] = Math.Clamp(2 * Random.Shared.NextDouble() - 1, -1, 1);
                     }
 
-                    if (Random.Shared.NextDouble() > 0.95)
+                    if (Random.Shared.NextDouble() < probabilityOfMutation)
                     {
-                        var current = _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
-                        
-                        _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] = Math.Clamp(current * ((2 * Random.Shared.NextDouble()) - 1), -1, 1);
+                        _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] = Math.Clamp(2 * Random.Shared.NextDouble() - 1, -1, 1);
                     }
                     
                 }
             }
         }
-    }
-
-    private class Node
-    {
-        public double Value { get; set; }
     }
 }

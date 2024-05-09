@@ -32,6 +32,11 @@ public class Board
         return Math.Sqrt(diffX * diffX + diffY * diffY);
     }
 
+    ///<summary>
+    /// Returns the largest improvement that can be made from current position, as a positive value.
+    /// E.g. if you're 1 unit away from target, and best move will take you 0.7 units away from target,
+    /// this method will return 0.3.
+    /// </summary>
     public double BestDistanceChangeInOneMove()
     {
         var currentDistance = Distance();
@@ -47,7 +52,7 @@ public class Board
             currentDistance - d2, 
             currentDistance - d3, 
             currentDistance - d4
-        }.Min();
+        }.Max();
     }
 
     public void Move(Direction direction)

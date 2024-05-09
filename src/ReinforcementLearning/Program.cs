@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace ReinforcementLearning;
 
@@ -6,13 +7,13 @@ public class Program
 {
     private static async Task Main()
     {
-        var numNetworks = 300;
+        var numNetworks = 2000;
         var boardSize = 10;
-        var numIter = 15;
+        var numIter = 20;
         var generation = 1;
 
         var networks = Enumerable.Range(0, numNetworks)
-            .Select(_ => new Network([4, 8, 16, 8, 4], Sigmoid))
+            .Select(_ => new Network([4, 8, 4], Sigmoid))
             .ToList();
 
         var stopwatch = new Stopwatch();
@@ -20,36 +21,57 @@ public class Program
 
         while (true)
         {
-            var networkScoreDict = new Dictionary<int, double>();
+            var networkScoreDict = new ConcurrentDictionary<int, double>();
+
+            var tasks = new List<Task>();
 
             for (var networkIndex = 0; networkIndex < numNetworks; networkIndex++)
             {
-                networkScoreDict[networkIndex] = 0;
-
-                for (var iteration = 0; iteration < numIter; iteration++)
+                var index = networkIndex;
+                // TODO - reuse board data per network...?
+                tasks.Add(Task.Run(() =>
                 {
-                    var board = GetBoard(boardSize);
-                    var distanceBefore = board.Distance();
+                    networkScoreDict[index] = 0;
 
-                    var bestPossibleDistanceDiff = board.BestDistanceChangeInOneMove();
+                    for (var iteration = 0; iteration < numIter; iteration++)
+                    {
+                        var board = GetBoard(boardSize);
+                        var distanceBefore = board.Distance();
+                        var bestPossibleDistanceDiff = board.BestDistanceChangeInOneMove();
 
-                    var output = networks[networkIndex].Propagate(board.GetPositions());
-                    var direction = TranslateOutput(output);
-                    board.Move(direction);
+                        var normalizedInputs = board.GetPositions()
+                            .Select(x => x / boardSize)
+                            .ToArray();
 
-                    var distanceAfter = board.Distance();
+                        var rawOutput = networks[index].Propagate(normalizedInputs);
 
-                    networkScoreDict[networkIndex] += (distanceBefore - distanceAfter) / bestPossibleDistanceDiff / numIter;
-                }
+                        var output = Softmax(rawOutput);
+
+                        var direction = TranslateOutput(output);
+
+                        board.Move(direction);
+
+                        var distanceAfter = board.Distance();
+                        var decreaseInDistance = distanceBefore - distanceAfter;
+                        var improvementRelativeToOptimal = decreaseInDistance / bestPossibleDistanceDiff;
+
+                        networkScoreDict[index] += improvementRelativeToOptimal / numIter;
+                    }
+                }));
             }
 
+            await Task.WhenAll(tasks);
+
             var orderedScores = networkScoreDict.OrderByDescending(s => s.Value).ToList();
-            var bestScores = orderedScores.Take((int)(numNetworks * 0.75)).ToList();
+            var bestScores = orderedScores.Take(numNetworks / 2).ToList();
             var bestNetworkIndexes = bestScores.Select(s => s.Key).ToList();
             var otherNetworkIndexes = Enumerable.Range(0, numNetworks).Except(bestNetworkIndexes).ToList();
 
             var bestNetworks = networks.Where(((_, index) => !otherNetworkIndexes.Contains(index))).ToList();
             var networksToSwap = networks.Where((_, index) => otherNetworkIndexes.Contains(index)).ToList();
+
+            var averageScore = orderedScores.Average(s => s.Value);
+            var probabilityOfMutation = Math.Clamp(1 - averageScore, 0, 1);
 
             foreach (var network in networksToSwap)
             {
@@ -57,7 +79,7 @@ public class Program
 
                 var goodNetworkCopy = CopyRandomGoodNetwork(bestNetworks);
 
-                goodNetworkCopy.Mutate();
+                goodNetworkCopy.Mutate(probabilityOfMutation);
 
                 networks.Add(goodNetworkCopy);
             }
@@ -68,7 +90,7 @@ public class Program
                 Console.WriteLine($"""
                                    Generation {generation}
                                    Best score: {bestScores[0].Value:0.00} (network {bestScores[0].Key})
-                                   Average score: {networkScoreDict.Average(n => n.Value):0.00}
+                                   Average score: {averageScore:0.00}
                                    Nth Generation time: {stopwatch.Elapsed.TotalSeconds:0.00} seconds
                                    """);
                 
@@ -95,10 +117,8 @@ public class Program
 
         if (randomStart == randomTarget)
         {
-            if (randomTarget.Item1 < size)
-                randomTarget.Item1++;
-            else
-                randomTarget.Item1--;
+            if (randomTarget.Item1 < size / 2) randomTarget.Item1++;
+            else randomTarget.Item1--;
         }
 
         return new(size, size, randomTarget, randomStart);
@@ -106,24 +126,46 @@ public class Program
 
     public static Direction TranslateOutput(double[] output)
     {
-        var o1 = output[0];
-        var o2 = output[1];
-        var o3 = output[2];
-        var o4 = output[3];
+        var indexOfMax = 0;
 
-        const double threshold = 0.9d;
+        for (var i = 1; i < output.Length; i++)
+        {
+            if (output[i] > output[indexOfMax]) indexOfMax = i;
+        }
 
-        if (o1 >= threshold) return Direction.Up;
-        if (o2 >= threshold) return Direction.Down;
-        if (o3 >= threshold) return Direction.Left;
-        if (o4 >= threshold) return Direction.Right;
-
-        return Direction.Up;
+        return indexOfMax switch
+        {
+            0 => Direction.Up,
+            1 => Direction.Down,
+            2 => Direction.Left,
+            3 => Direction.Right,
+            _ => throw new()
+        };
     }
 
     public static double Sigmoid(double value)
     {
-        var k = (double) Math.Exp((double) value);
+        var k = Math.Exp(value);
         return k / (1.0d + k);
+    }
+
+    
+    public static double[] Softmax(double[] values)
+    {
+        var max = values.Max();
+        var scale = 0.0;
+
+        for (var i = 0; i < values.Length; i++)
+        {
+            values[i] = Math.Exp(values[i] - max);
+            scale += values[i];
+        }
+
+        for (var i = 0; i < values.Length; i++)
+        {
+            values[i] /= scale;
+        }
+
+        return values;
     }
 }
