@@ -77,7 +77,7 @@ public class Network
 
     private double Activation(double x) => _activationFunction(x);
 
-    public double[] Propagate(int[] inputs)
+    public double[] Propagate(double[] inputs)
     {
         // Feed inputs to input layer
         for (var nodeIndex = 0; nodeIndex < inputs.Length; nodeIndex++)
@@ -96,13 +96,14 @@ public class Network
             {
                 for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayer.Length; nextLayerNodeIndex++)
                 {
-                    // Find weight and calculate next layer node's value
+                    // Find weight/bias and calculate next layer node's value
                     var weight = _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
                     var bias = _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
                     nextLayer[nextLayerNodeIndex] += (currentLayer[currentLayerNodeIndex] * weight) + bias;
                 }
             }
 
+            // Run activation function on each node in next layer
             for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayer.Length; nextLayerNodeIndex++)
             {
                 nextLayer[nextLayerNodeIndex] = Activation(nextLayer[nextLayerNodeIndex]);
@@ -113,7 +114,7 @@ public class Network
         return [.. _nodes.Last()];
     }
 
-    public void Mutate(double probabilityOfMutation)
+    public void MutateRandomly(double probabilityOfMutation)
     {
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
         {

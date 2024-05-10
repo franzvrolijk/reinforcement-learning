@@ -7,17 +7,18 @@ public class Program
 {
     private static async Task Main()
     {
-        var numNetworks = 2000;
-        var boardSize = 10;
+        var numNetworks = 40;
+        var boardSize = 50;
         var numIter = 20;
-        var generation = 1;
 
         var networks = Enumerable.Range(0, numNetworks)
-            .Select(_ => new Network([4, 8, 4], Sigmoid))
+            .Select(_ => new Network([4, 8, 8, 4], Sigmoid))
             .ToList();
 
         var stopwatch = new Stopwatch();
         stopwatch.Start();
+
+        var generation = 1;
 
         while (true)
         {
@@ -40,7 +41,7 @@ public class Program
                         var bestPossibleDistanceDiff = board.BestDistanceChangeInOneMove();
 
                         var normalizedInputs = board.GetPositions()
-                            .Select(x => x / boardSize)
+                            .Select(x => (double)x / (boardSize - 1))
                             .ToArray();
 
                         var rawOutput = networks[index].Propagate(normalizedInputs);
@@ -55,23 +56,27 @@ public class Program
                         var decreaseInDistance = distanceBefore - distanceAfter;
                         var improvementRelativeToOptimal = decreaseInDistance / bestPossibleDistanceDiff;
 
-                        networkScoreDict[index] += improvementRelativeToOptimal / numIter;
+                        networkScoreDict[index] += Math.Max(0, improvementRelativeToOptimal);
                     }
                 }));
             }
 
             await Task.WhenAll(tasks);
 
+            foreach (var (index, score) in networkScoreDict)
+            {
+                networkScoreDict[index] = score / numIter;
+            }
+
             var orderedScores = networkScoreDict.OrderByDescending(s => s.Value).ToList();
             var bestScores = orderedScores.Take(numNetworks / 2).ToList();
             var bestNetworkIndexes = bestScores.Select(s => s.Key).ToList();
-            var otherNetworkIndexes = Enumerable.Range(0, numNetworks).Except(bestNetworkIndexes).ToList();
 
-            var bestNetworks = networks.Where(((_, index) => !otherNetworkIndexes.Contains(index))).ToList();
-            var networksToSwap = networks.Where((_, index) => otherNetworkIndexes.Contains(index)).ToList();
+            var bestNetworks = networks.Where((_, index) => bestNetworkIndexes.Contains(index)).ToList();
+            var networksToSwap = networks.Where((_, index) => !bestNetworkIndexes.Contains(index)).ToList();
 
             var averageScore = orderedScores.Average(s => s.Value);
-            var probabilityOfMutation = Math.Clamp(1 - averageScore, 0, 1);
+            var probabilityOfMutation = 0.00001d;//Math.Clamp(1 - averageScore, 0, 1);
 
             foreach (var network in networksToSwap)
             {
@@ -79,12 +84,13 @@ public class Program
 
                 var goodNetworkCopy = CopyRandomGoodNetwork(bestNetworks);
 
-                goodNetworkCopy.Mutate(probabilityOfMutation);
+                // TODO - introduce gradient descent here
+                goodNetworkCopy.MutateRandomly(probabilityOfMutation);
 
                 networks.Add(goodNetworkCopy);
             }
 
-            if (generation % 100 == 0)
+            if (generation % 1000 == 0)
             {
                 Console.Clear();
                 Console.WriteLine($"""
@@ -93,7 +99,7 @@ public class Program
                                    Average score: {averageScore:0.00}
                                    Nth Generation time: {stopwatch.Elapsed.TotalSeconds:0.00} seconds
                                    """);
-                
+
                 stopwatch.Restart();
             }
 
@@ -149,7 +155,7 @@ public class Program
         return k / (1.0d + k);
     }
 
-    
+
     public static double[] Softmax(double[] values)
     {
         var max = values.Max();
