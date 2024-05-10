@@ -9,6 +9,14 @@ public class Board
     private (int, int) _targetPos;
     private (int, int) _currentPos;
 
+    private readonly Dictionary<Direction, Direction> _oppositeDirections = new()
+    {
+        { Direction.Up, Direction.Down },
+        { Direction.Down, Direction.Up },
+        { Direction.Left, Direction.Right },
+        { Direction.Right, Direction.Left }
+    };
+
     public Board(int width, int height, (int, int) targetPos, (int, int) startPos)
     {
         _targetPos = targetPos;
@@ -17,9 +25,35 @@ public class Board
         _height = height;
     }
 
+    public static Board Generate((int, int) size)
+    {
+        var (width, height) = size;
+
+        var randomStart = (Random.Shared.Next(0, width), Random.Shared.Next(0, height));
+        var randomTarget = (Random.Shared.Next(0, width), Random.Shared.Next(0, height));
+
+        while (randomTarget == randomStart)
+        {
+            randomTarget = (Random.Shared.Next(0, width), Random.Shared.Next(0, height));
+        }
+
+        return new(width, height, randomTarget, randomStart);
+    }
+
     public int[] GetPositions()
     {
         return [_targetPos.Item1, _targetPos.Item2, _currentPos.Item1, _currentPos.Item2];
+    }
+
+    public double[] GetNormalizedPositions()
+    {
+        return 
+        [
+            (double)_targetPos.Item1 / _width, 
+            (double)_targetPos.Item2 / _height,
+            (double)_currentPos.Item1 / _width, 
+            (double)_currentPos.Item2 / _height
+        ];
     }
 
     public double Distance() => EuclidianDistance(_targetPos, _currentPos);
@@ -37,7 +71,7 @@ public class Board
     /// E.g. if you're 1 unit away from target, and best move will take you 0.7 units away from target,
     /// this method will return 0.3.
     /// </summary>
-    public double BestDistanceChangeInOneMove()
+    public double OptimalReductionInDistance()
     {
         var currentDistance = Distance();
 
@@ -74,6 +108,12 @@ public class Board
             default:
                 throw new($"Invalid direction");
         }
+    }
+
+    public void UndoMove(Direction direction)
+    {
+        var oppositeDirection = _oppositeDirections[direction];
+        Move(oppositeDirection);
     }
 
     public void Print()

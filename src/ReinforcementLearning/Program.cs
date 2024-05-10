@@ -1,133 +1,101 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
-
-namespace ReinforcementLearning;
+﻿namespace ReinforcementLearning;
 
 public class Program
 {
+    private static readonly (int, int) BoardSize = (100, 100);
+
     private static async Task Main()
     {
-        var numNetworks = 40;
-        var boardSize = 50;
-        var numIter = 20;
+        var network = new Network([4, 8, 8, 4], Activation.Sigmoid);
 
-        var networks = Enumerable.Range(0, numNetworks)
-            .Select(_ => new Network([4, 8, 8, 4], Sigmoid))
-            .ToList();
+        var trainingIterations = 100;
+        var measureIterations = 100;
+        var measureBoards = Enumerable.Range(0, measureIterations).Select(_ => Board.Generate(BoardSize)).ToArray();
 
-        var stopwatch = new Stopwatch();
-        stopwatch.Start();
+        var iteration = 1;
 
-        var generation = 1;
-
+        var previousAvgLoss = 1d;
         while (true)
         {
-            var networkScoreDict = new ConcurrentDictionary<int, double>();
-
-            var tasks = new List<Task>();
-
-            for (var networkIndex = 0; networkIndex < numNetworks; networkIndex++)
+            // Train
+            for (var i = 0; i < trainingIterations; i++)
             {
-                var index = networkIndex;
-                // TODO - reuse board data per network...?
-                tasks.Add(Task.Run(() =>
+                var board = measureBoards[i];
+
+                var normalizedInputs = board.GetNormalizedPositions();
+
+                var loss = () =>
                 {
-                    networkScoreDict[index] = 0;
+                    var output = network.Propagate(normalizedInputs);
 
-                    for (var iteration = 0; iteration < numIter; iteration++)
-                    {
-                        var board = GetBoard(boardSize);
-                        var distanceBefore = board.Distance();
-                        var bestPossibleDistanceDiff = board.BestDistanceChangeInOneMove();
+                    var softmaxOutput = Activation.Softmax(output);
 
-                        var normalizedInputs = board.GetPositions()
-                            .Select(x => (double)x / (boardSize - 1))
-                            .ToArray();
+                    var direction = TranslateOutput(softmaxOutput);
 
-                        var rawOutput = networks[index].Propagate(normalizedInputs);
+                    var optimalReductionInDistance = board.OptimalReductionInDistance();
 
-                        var output = Softmax(rawOutput);
+                    var preMoveDistance = board.Distance();
 
-                        var direction = TranslateOutput(output);
+                    board.Move(direction);
 
-                        board.Move(direction);
+                    var postMoveDistance = board.Distance();
 
-                        var distanceAfter = board.Distance();
-                        var decreaseInDistance = distanceBefore - distanceAfter;
-                        var improvementRelativeToOptimal = decreaseInDistance / bestPossibleDistanceDiff;
+                    board.UndoMove(direction);
 
-                        networkScoreDict[index] += Math.Max(0, improvementRelativeToOptimal);
-                    }
-                }));
+                    var reductionInDistance = preMoveDistance - postMoveDistance;
+
+                    var reductionRelativeToOptimal = reductionInDistance / optimalReductionInDistance;
+
+                    return 1 - reductionRelativeToOptimal;
+                };
+
+                var learningRate = 0.0000001d;
+
+                network.Learn(loss, learningRate);
             }
 
-            await Task.WhenAll(tasks);
+            // Measure performance
+            var totalLoss = 0d;
 
-            foreach (var (index, score) in networkScoreDict)
+            for (var i = 0; i < measureIterations; i++)
             {
-                networkScoreDict[index] = score / numIter;
+                var board = measureBoards[i];
+
+                var normalizedInputs = board.GetNormalizedPositions();
+
+                var output = network.Propagate(normalizedInputs);
+
+                var softmaxOutput = Activation.Softmax(output);
+
+                var direction = TranslateOutput(softmaxOutput);
+
+                var optimalReductionInDistance = board.OptimalReductionInDistance();
+
+                var preMoveDistance = board.Distance();
+
+                board.Move(direction);
+
+                var postMoveDistance = board.Distance();
+
+                board.UndoMove(direction);
+
+                var reductionInDistance = preMoveDistance - postMoveDistance;
+
+                var reductionRelativeToOptimal = reductionInDistance / optimalReductionInDistance;
+
+                var loss = 1 - reductionRelativeToOptimal;
+
+                totalLoss += loss;
             }
 
-            var orderedScores = networkScoreDict.OrderByDescending(s => s.Value).ToList();
-            var bestScores = orderedScores.Take(numNetworks / 2).ToList();
-            var bestNetworkIndexes = bestScores.Select(s => s.Key).ToList();
+            var averageLoss = totalLoss / measureIterations;
+            previousAvgLoss = averageLoss;
+            
+            Console.Clear();
+            Console.WriteLine($"#{iteration} - Average loss: {averageLoss}");
 
-            var bestNetworks = networks.Where((_, index) => bestNetworkIndexes.Contains(index)).ToList();
-            var networksToSwap = networks.Where((_, index) => !bestNetworkIndexes.Contains(index)).ToList();
-
-            var averageScore = orderedScores.Average(s => s.Value);
-            var probabilityOfMutation = 0.00001d;//Math.Clamp(1 - averageScore, 0, 1);
-
-            foreach (var network in networksToSwap)
-            {
-                networks.Remove(network);
-
-                var goodNetworkCopy = CopyRandomGoodNetwork(bestNetworks);
-
-                // TODO - introduce gradient descent here
-                goodNetworkCopy.MutateRandomly(probabilityOfMutation);
-
-                networks.Add(goodNetworkCopy);
-            }
-
-            if (generation % 1000 == 0)
-            {
-                Console.Clear();
-                Console.WriteLine($"""
-                                   Generation {generation}
-                                   Best score: {bestScores[0].Value:0.00} (network {bestScores[0].Key})
-                                   Average score: {averageScore:0.00}
-                                   Nth Generation time: {stopwatch.Elapsed.TotalSeconds:0.00} seconds
-                                   """);
-
-                stopwatch.Restart();
-            }
-
-            generation++;
+            iteration++;
         }
-    }
-
-    private static Network CopyRandomGoodNetwork(List<Network> networks)
-    {
-        var randomIndex = Random.Shared.Next(0, networks.Count);
-
-        var networkToCopy = networks[randomIndex];
-
-        return networkToCopy.Copy();
-    }
-
-    public static Board GetBoard(int size)
-    {
-        var randomStart = (Random.Shared.Next(0, size), Random.Shared.Next(0, size));
-        var randomTarget = (Random.Shared.Next(0, size), Random.Shared.Next(0, size));
-
-        if (randomStart == randomTarget)
-        {
-            if (randomTarget.Item1 < size / 2) randomTarget.Item1++;
-            else randomTarget.Item1--;
-        }
-
-        return new(size, size, randomTarget, randomStart);
     }
 
     public static Direction TranslateOutput(double[] output)
@@ -149,29 +117,5 @@ public class Program
         };
     }
 
-    public static double Sigmoid(double value)
-    {
-        var k = Math.Exp(value);
-        return k / (1.0d + k);
-    }
-
-
-    public static double[] Softmax(double[] values)
-    {
-        var max = values.Max();
-        var scale = 0.0;
-
-        for (var i = 0; i < values.Length; i++)
-        {
-            values[i] = Math.Exp(values[i] - max);
-            scale += values[i];
-        }
-
-        for (var i = 0; i < values.Length; i++)
-        {
-            values[i] /= scale;
-        }
-
-        return values;
-    }
+    
 }

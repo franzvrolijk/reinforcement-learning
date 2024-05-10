@@ -114,6 +114,53 @@ public class Network
         return [.. _nodes.Last()];
     }
 
+    public void Learn(Func<double> loss, double learningRate)
+    {
+        for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
+        {
+            var currentLayerSize = _layerSizes[layerIndex];
+            var nextLayerSize = _layerSizes[layerIndex + 1];
+
+            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < currentLayerSize; currentLayerNodeIndex++)
+            {
+                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayerSize; nextLayerNodeIndex++)
+                {
+                    var lossBefore = loss();
+
+                    _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += learningRate;
+
+                    var lossAfter = loss();
+
+                    if (lossAfter > lossBefore)
+                    {
+                        _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= learningRate * 2;
+
+                        lossAfter = loss();
+
+                        if (lossAfter > lossBefore)
+                            _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += learningRate;
+                    }
+
+                    lossBefore = loss();
+
+                    _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += learningRate;
+
+                    lossAfter = loss();
+
+                    if (lossAfter > lossBefore)
+                    {
+                        _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= learningRate * 2;
+
+                        lossAfter = loss();
+
+                        if (lossAfter > lossBefore)
+                            _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += learningRate;
+                    }
+                }
+            }
+        }
+    }
+
     public void MutateRandomly(double probabilityOfMutation)
     {
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
