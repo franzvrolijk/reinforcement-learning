@@ -8,7 +8,7 @@ public class Program
     {
         var network = new Network([4, 8, 8, 4], Activation.Sigmoid);
 
-        var trainingIterations = 100;
+        var trainingIterations = 1000;
         var measureIterations = 100;
         var measureBoards = Enumerable.Range(0, measureIterations).Select(_ => Board.Generate(BoardSize)).ToArray();
 
@@ -20,7 +20,7 @@ public class Program
             // Train
             for (var i = 0; i < trainingIterations; i++)
             {
-                var board = measureBoards[i];
+                var board = Board.Generate(BoardSize);
 
                 var normalizedInputs = board.GetNormalizedPositions();
 
@@ -49,7 +49,7 @@ public class Program
                     return 1 - reductionRelativeToOptimal;
                 };
 
-                var learningRate = 0.0000001d;
+                var learningRate = 1 * previousAvgLoss;
 
                 network.Learn(loss, learningRate);
             }
