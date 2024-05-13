@@ -4,8 +4,14 @@ public class Activation
 {
     public static double Sigmoid(double value)
     {
-        var k = Math.Exp(value);
-        return k / (1.0d + k);
+        var x = Math.Exp(-value);
+
+        if (double.IsNaN(x))
+        {
+            throw new("NaN encountered");
+        }
+
+        return 1 / (1 + x);
     }
 
     public static double[] Softmax(double[] values)

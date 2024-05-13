@@ -5,18 +5,15 @@ public class Network
     // _nodes[layerIndex][nodeIndex]
     private readonly double[][] _nodes;
 
-    // _weights[fromLayerIndex][fromNodeIndex][toNodeIndex]
-    private readonly double[][][] _weights;
+    // Weights[fromLayerIndex][fromNodeIndex][toNodeIndex]
+    public readonly double[][][] Weights;
 
-    private readonly double[][][] _biases;
-
-    private readonly double[][][] _weightGradients;
-
-    private readonly double[][][] _biasGradients;
+    public readonly double[][][] Biases;
 
     private readonly int[] _layerSizes;
 
     private readonly Func<double, double> _activationFunction;
+    private static double RandomWeightValue => 0.01 * Random.Shared.NextDouble() - 0.005;
 
     public Network(int[] layerSizes, Func<double, double> activationFunction, double[][][]? weights = null, double[][][]? biases = null)
     {
@@ -27,11 +24,11 @@ public class Network
 
         if (weights != null)
         {
-            _weights = weights;
+            Weights = weights;
         }
         else
         {
-            _weights = new double[layerSizes.Length - 1][][];
+            Weights = new double[layerSizes.Length - 1][][];
 
             // Generate weights
             for (var i = 0; i < layerSizes.Length - 1; i++)
@@ -41,9 +38,9 @@ public class Network
                 var nextLayerSize = layerSizes[i + 1];
 
 
-                _weights[i] = Enumerable.Range(0, currentLayerSize)
+                Weights[i] = Enumerable.Range(0, currentLayerSize)
                     .Select(_ => Enumerable.Range(0, nextLayerSize)
-                        .Select(_ => 0.01 * Random.Shared.NextDouble() - 0.005)
+                        .Select(_ => RandomWeightValue)
                         .ToArray())
                     .ToArray();
             }
@@ -51,11 +48,11 @@ public class Network
 
         if (biases != null)
         {
-            _biases = biases;
+            Biases = biases;
         }
         else
         {
-            _biases = new double[layerSizes.Length - 1][][];
+            Biases = new double[layerSizes.Length - 1][][];
 
             // Generate biases
             for (var i = 0; i < layerSizes.Length - 1; i++)
@@ -65,7 +62,7 @@ public class Network
                 var nextLayerSize = layerSizes[i + 1];
 
 
-                _biases[i] = Enumerable.Range(0, currentLayerSize)
+                Biases[i] = Enumerable.Range(0, currentLayerSize)
                     .Select(_ => Enumerable.Range(0, nextLayerSize)
                         .Select(_ => 0.01)
                         .ToArray())
@@ -76,7 +73,7 @@ public class Network
 
     public Network Copy()
     {
-        return new (_layerSizes, _activationFunction, _weights.Select(w => w).ToArray(), _biases.Select(b => b).ToArray());
+        return new (_layerSizes, _activationFunction, Weights.Select(w => w).ToArray(), Biases.Select(b => b).ToArray());
     }
 
     private double Activation(double x) => _activationFunction(x);
@@ -89,7 +86,7 @@ public class Network
             _nodes[0][nodeIndex] = inputs[nodeIndex];
         }
 
-        // For every layer except first and last
+        // For every layer except last
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
         {
             var currentLayer = _nodes[layerIndex];
@@ -101,8 +98,8 @@ public class Network
                 for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayer.Length; nextLayerNodeIndex++)
                 {
                     // Find weight/bias and calculate next layer node's value
-                    var weight = _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
-                    var bias = _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
+                    var weight = Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
+                    var bias = Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
                     nextLayer[nextLayerNodeIndex] += (currentLayer[currentLayerNodeIndex] * weight) + bias;
                 }
             }
@@ -118,10 +115,8 @@ public class Network
         return [.. _nodes.Last()];
     }
 
-    public void Learn(Func<double> loss, double learnRate)
+    public void GradientDescent(Func<double> loss, double learnRate, double delta)
     {
-        const double x = 0.00000001d;
-
         var weightGradients = new Dictionary<(int, int, int), double>();
         var biasGradients = new Dictionary<(int, int, int), double>();
 
@@ -137,30 +132,31 @@ public class Network
                 {
                     var lossBefore = loss();
 
-                    _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += x;
+                    Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += delta;
 
                     var lossAfter = loss();
 
                     var deltaLoss = lossAfter - lossBefore;
 
-                    var derivative = deltaLoss / x;
+                    var derivative = deltaLoss / delta;
 
                     weightGradients[(layerIndex, currentLayerNodeIndex, nextLayerNodeIndex)] = derivative;
 
+                    Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= delta;
+
                     lossBefore = lossAfter;
 
-                    _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += x;
+                    Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += delta;
 
                     lossAfter = loss();
 
                     deltaLoss = lossAfter - lossBefore;
 
-                    derivative = deltaLoss / x;
+                    derivative = deltaLoss / delta;
 
                     biasGradients[(layerIndex, currentLayerNodeIndex, nextLayerNodeIndex)] = derivative;
 
-                    _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= x;
-                    _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= x;
+                    Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= delta;
                 }
             }
         }
@@ -185,8 +181,8 @@ public class Network
                         ? learnRate
                         : learnRate * -1;
 
-                    _weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += weightAddition;
-                    _biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += biasAddition;
+                    Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += weightAddition;
+                    Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += biasAddition;
                 }
             }
         }
