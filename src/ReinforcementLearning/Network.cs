@@ -1,79 +1,42 @@
-﻿namespace ReinforcementLearning;
+﻿using ILGPU;
+using ILGPU.Runtime;
+
+namespace ReinforcementLearning;
 
 public class Network
 {
-    // _nodes[layerIndex][nodeIndex]
-    private readonly double[][] _nodes;
+    private readonly double[] _nodes;
 
-    // Weights[fromLayerIndex][fromNodeIndex][toNodeIndex]
-    public readonly double[][][] Weights;
+    public readonly double[] Weights;
 
-    public readonly double[][][] Biases;
+    public readonly double[] Biases;
 
     private readonly int[] _layerSizes;
 
     private readonly Func<double, double> _activationFunction;
     private static double RandomWeightValue => 0.01 * Random.Shared.NextDouble() - 0.005;
 
-    public Network(int[] layerSizes, Func<double, double> activationFunction, double[][][]? weights = null, double[][][]? biases = null)
+    public Network(int[] layerSizes, Func<double, double> activationFunction, double[]? weights = null, double[]? biases = null)
     {
         _layerSizes = layerSizes;
         _activationFunction = activationFunction;
-        
-        _nodes = layerSizes.Select(i => Enumerable.Range(0, i).Select(_ => 0d).ToArray()).ToArray();
 
-        if (weights != null)
+        _nodes = new double[_layerSizes.Sum()];
+
+        var totalWeightsAndBiases = 0;
+
+        for (var i = 0; i < layerSizes.Length - 1; i++)
         {
-            Weights = weights;
-        }
-        else
-        {
-            Weights = new double[layerSizes.Length - 1][][];
-
-            // Generate weights
-            for (var i = 0; i < layerSizes.Length - 1; i++)
-            {
-                // Weights from layer i to layer i + 1
-                var currentLayerSize = layerSizes[i];
-                var nextLayerSize = layerSizes[i + 1];
-
-
-                Weights[i] = Enumerable.Range(0, currentLayerSize)
-                    .Select(_ => Enumerable.Range(0, nextLayerSize)
-                        .Select(_ => RandomWeightValue)
-                        .ToArray())
-                    .ToArray();
-            }
+            totalWeightsAndBiases += layerSizes[i] * layerSizes[i + 1];
         }
 
-        if (biases != null)
-        {
-            Biases = biases;
-        }
-        else
-        {
-            Biases = new double[layerSizes.Length - 1][][];
-
-            // Generate biases
-            for (var i = 0; i < layerSizes.Length - 1; i++)
-            {
-                // Weights from layer i to layer i + 1
-                var currentLayerSize = layerSizes[i];
-                var nextLayerSize = layerSizes[i + 1];
-
-
-                Biases[i] = Enumerable.Range(0, currentLayerSize)
-                    .Select(_ => Enumerable.Range(0, nextLayerSize)
-                        .Select(_ => 0.01)
-                        .ToArray())
-                    .ToArray();
-            }
-        }
+        Weights = weights ?? Enumerable.Range(0, totalWeightsAndBiases).Select(_ => RandomWeightValue).ToArray();
+        Biases = biases ?? Enumerable.Range(0, totalWeightsAndBiases).Select(_ => 0.01).ToArray();
     }
 
     public Network Copy()
     {
-        return new (_layerSizes, _activationFunction, Weights.Select(w => w).ToArray(), Biases.Select(b => b).ToArray());
+        return new(_layerSizes, _activationFunction, Weights.Select(w => w).ToArray(), Biases.Select(b => b).ToArray());
     }
 
     private double Activation(double x) => _activationFunction(x);
@@ -81,58 +44,54 @@ public class Network
     public double[] Propagate(double[] inputs)
     {
         // Feed inputs to input layer
-        for (var nodeIndex = 0; nodeIndex < inputs.Length; nodeIndex++)
+        for (var inputIndex = 0; inputIndex < inputs.Length; inputIndex++)
         {
-            _nodes[0][nodeIndex] = inputs[nodeIndex];
+            _nodes[inputIndex] = inputs[inputIndex];
         }
 
-        // For every layer except last
+        // Find weight/bias and calculate next layer node's value
+        var weightAndBiasIndex = 0;
+        var nodeIndex = 0;
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
         {
-            var currentLayer = _nodes[layerIndex];
-            var nextLayer = _nodes[layerIndex + 1];
-
-            // For every combination of node in current and next layer
-            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < currentLayer.Length; currentLayerNodeIndex++)
+            for (var currentNodeIndex = 0; currentNodeIndex < _layerSizes[layerIndex]; currentNodeIndex++)
             {
-                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayer.Length; nextLayerNodeIndex++)
+                for (var nextNodeIndex = 0; nextNodeIndex < _layerSizes[layerIndex + 1]; nextNodeIndex++)
                 {
-                    // Find weight/bias and calculate next layer node's value
-                    var weight = Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
-                    var bias = Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex];
-                    nextLayer[nextLayerNodeIndex] += (currentLayer[currentLayerNodeIndex] * weight) + bias;
+                    // Calculate the index of the next node in the _nodes array
+                    var nextNodeArrayIndex = nodeIndex + _layerSizes[layerIndex] + nextNodeIndex;
+
+                    // Run activation function on each node in next layer
+                    _nodes[nextNodeArrayIndex] += Activation(_nodes[nodeIndex + currentNodeIndex] * Weights[weightAndBiasIndex] + Biases[weightAndBiasIndex]);
+
+                    weightAndBiasIndex++;
                 }
             }
-
-            // Run activation function on each node in next layer
-            for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayer.Length; nextLayerNodeIndex++)
-            {
-                nextLayer[nextLayerNodeIndex] = Activation(nextLayer[nextLayerNodeIndex]);
-            }
+            nodeIndex += _layerSizes[layerIndex];
         }
 
+        var nodesBeforeOutput = _nodes.Length - _layerSizes[^1];
+
         // Calculate outputs
-        return [.. _nodes.Last()];
+        return _nodes[nodesBeforeOutput..];
     }
 
     public void GradientDescent(Func<double> loss, double learnRate, double delta)
     {
-        var weightGradients = new Dictionary<(int, int, int), double>();
-        var biasGradients = new Dictionary<(int, int, int), double>();
+        var weightGradients = new double[Weights.Length];
+        var biasGradients = new double[Biases.Length];
 
         // Compute gradients of loss function based on change in weights/biases
+        var weightAndBiasIndex = 0;
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
         {
-            var currentLayerSize = _layerSizes[layerIndex];
-            var nextLayerSize = _layerSizes[layerIndex + 1];
-
-            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < currentLayerSize; currentLayerNodeIndex++)
+            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < _layerSizes[layerIndex]; currentLayerNodeIndex++)
             {
-                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayerSize; nextLayerNodeIndex++)
+                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
                 {
                     var lossBefore = loss();
 
-                    Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += delta;
+                    Weights[weightAndBiasIndex] += delta;
 
                     var lossAfter = loss();
 
@@ -140,13 +99,15 @@ public class Network
 
                     var derivative = deltaLoss / delta;
 
-                    weightGradients[(layerIndex, currentLayerNodeIndex, nextLayerNodeIndex)] = derivative;
+                    weightGradients[weightAndBiasIndex] = derivative < 0
+                        ? learnRate
+                        : learnRate * -1; ;
 
-                    Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= delta;
+                    Weights[weightAndBiasIndex] -= delta;
 
                     lossBefore = lossAfter;
 
-                    Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += delta;
+                    Biases[weightAndBiasIndex] += delta;
 
                     lossAfter = loss();
 
@@ -154,35 +115,103 @@ public class Network
 
                     derivative = deltaLoss / delta;
 
-                    biasGradients[(layerIndex, currentLayerNodeIndex, nextLayerNodeIndex)] = derivative;
+                    biasGradients[weightAndBiasIndex] = derivative < 0
+                        ? learnRate
+                        : learnRate * -1; ;
 
-                    Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] -= delta;
+                    Biases[weightAndBiasIndex] -= delta;
+
+                    weightAndBiasIndex++;
                 }
             }
         }
 
         // Update weights and biases based on gradients
+        weightAndBiasIndex = 0;
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
         {
-            var currentLayerSize = _layerSizes[layerIndex];
-            var nextLayerSize = _layerSizes[layerIndex + 1];
-
-            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < currentLayerSize; currentLayerNodeIndex++)
+            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < _layerSizes[layerIndex]; currentLayerNodeIndex++)
             {
-                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < nextLayerSize; nextLayerNodeIndex++)
+                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
                 {
-                    var (weightGradient, biasGradient) = (weightGradients[(layerIndex, currentLayerNodeIndex, nextLayerNodeIndex)], biasGradients[(layerIndex, currentLayerNodeIndex, nextLayerNodeIndex)]);
+                    Weights[weightAndBiasIndex] += weightGradients[weightAndBiasIndex];
+                    Biases[weightAndBiasIndex] += biasGradients[weightAndBiasIndex];
 
-                    var weightAddition = weightGradient < 0 
-                        ? learnRate 
-                        : learnRate * -1;
+                    weightAndBiasIndex++;
+                }
+            }
+        }
+    }
 
-                    var biasAddition = biasGradient < 0
-                        ? learnRate
-                        : learnRate * -1;
+    public void GradientDescentGpu(Func<double> loss, double learnRate, double delta, Accelerator accelerator)
+    {
+        var weightGradients = new double[Weights.Length];
+        var biasGradients = new double[Biases.Length];
 
-                    Weights[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += weightAddition;
-                    Biases[layerIndex][currentLayerNodeIndex][nextLayerNodeIndex] += biasAddition;
+        var lossBefore = loss();
+
+        // Compute gradients of loss function based on change in weights/biases
+        var weightAndBiasIndex = 0;
+        for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
+        {
+            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < _layerSizes[layerIndex]; currentLayerNodeIndex++)
+            {
+                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
+                {
+                    Weights[weightAndBiasIndex] += delta;
+
+                    var lossAfter = loss();
+
+                    var deltaLoss = lossAfter - lossBefore;
+
+                    var gradient = deltaLoss / delta;
+
+                    weightGradients[weightAndBiasIndex] = gradient < 0 ? learnRate : learnRate * -1;
+
+                    Weights[weightAndBiasIndex] -= delta;
+
+                    Biases[weightAndBiasIndex] += delta;
+
+                    lossAfter = loss();
+
+                    deltaLoss = lossAfter - lossBefore;
+
+                    gradient = deltaLoss / delta;
+
+                    biasGradients[weightAndBiasIndex] = gradient < 0 ? learnRate : learnRate * -1;
+
+                    Biases[weightAndBiasIndex] -= delta;
+
+                    weightAndBiasIndex++;
+                }
+            }
+        }
+
+        // Update weights and biases based on gradients
+        var gpuData = accelerator.Allocate1D(weightGradients.Concat(biasGradients).ToArray());
+
+        var gpuOutput = accelerator.Allocate1D(Weights.Concat(Biases).ToArray());
+
+        var loadedKernel = accelerator.LoadAutoGroupedStreamKernel((Index1D index, ArrayView<double>  data, ArrayView<double> output) =>
+        {
+            output[index] += data[index];
+        });
+
+        loadedKernel((int)gpuData.Length, gpuData.View, gpuOutput.View);
+
+        accelerator.Synchronize();
+
+        var hostOutput = gpuOutput.GetAsArray1D();
+
+        weightAndBiasIndex = 0;
+        for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
+        {
+            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < _layerSizes[layerIndex]; currentLayerNodeIndex++)
+            {
+                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
+                {
+                    Weights[weightAndBiasIndex] = hostOutput[weightAndBiasIndex];
+                    Biases[weightAndBiasIndex] = hostOutput[Weights.Length + weightAndBiasIndex];
                 }
             }
         }

@@ -77,6 +77,18 @@ public class Board
         _currentPos = (newX, newY);
     }
 
+    public double DistanceAfterMove(double directionAsFloat)
+    {
+        // Convert float to radians directly
+        var directionAsRadians = directionAsFloat * 2 * Math.PI;
+
+        // Calculate the new position
+        var newX = _currentPos.Item1 + Math.Cos(directionAsRadians);
+        var newY = _currentPos.Item2 + Math.Sin(directionAsRadians);
+
+        return EuclidianDistance(_targetPos, (newX, newY));
+    }
+
     public void UndoMove(double directionAsFloat)
     {
         var invertedDirection = directionAsFloat < 0.5
