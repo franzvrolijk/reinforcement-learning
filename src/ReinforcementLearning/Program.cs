@@ -9,12 +9,25 @@ public class Program
 
     private static void Main()
     {
-        const int trainingIterations = 100;
-        const double initialLearningRate = 0.2d;
-        const double learningRateDecay = 0.1d;
-        const double delta = 0.00000001d;
+        const int trainingIterations = 1000;
+        const double initialLearningRate = 0.001d;
+        const double learningRateDecay = 0.001d;
+        const double delta = 0.0000001d;
 
-        var network = new Network([4, 8, 16, 4, 1], Activation.Sigmoid);
+        var testData = Enumerable.Range(0, 10).Select(_ =>
+        {
+            var board = Board.Generate(BoardSize);
+
+            return new
+            {
+                Board = board,
+                PreMoveDistance = board.Distance(),
+                OptimalReductionInDistance = board.OptimalReductionInDistance(),
+                NormalizedPositions = board.GetNormalizedPositions()
+            };
+        }).ToList();
+
+        var network = new Network([4, 6, 1], Activation.Sigmoid);
         using var context = Context.CreateDefault();
         using var accelerator = context.GetPreferredDevice(false).CreateAccelerator(context);
 
@@ -56,23 +69,15 @@ public class Program
 
             for (var i = 0; i < 10; i++)
             {
-                board = Board.Generate(BoardSize);
+                var testCase = testData[i];
 
-                normalizedInputs = board.GetNormalizedPositions();
+                var direction = network.Propagate(testCase.NormalizedPositions)[0];
 
-                var direction = network.Propagate(normalizedInputs)[0];
+                var postMoveDistance = testCase.Board.DistanceAfterMove(direction);
 
-                optimalReductionInDistance = board.OptimalReductionInDistance();
+                var reductionInDistance = testCase.PreMoveDistance - postMoveDistance;
 
-                preMoveDistance = board.Distance();
-
-                board.Move(direction);
-
-                var postMoveDistance = board.Distance();
-
-                var reductionInDistance = preMoveDistance - postMoveDistance;
-
-                var reductionRelativeToOptimal = reductionInDistance / optimalReductionInDistance;
+                var reductionRelativeToOptimal = reductionInDistance / testCase.OptimalReductionInDistance;
 
                 scores.Add(reductionRelativeToOptimal);
             }
@@ -80,7 +85,9 @@ public class Program
             var min = scores.Min();
             var max = scores.Max();
             var (avg, spread) = (scores.Average(), max - min);
-            Console.WriteLine($"(Iteration {iteration})\tAvg: {avg:0.00}\tMin: {min:0.00}\tMax {max:0.00}\tSpread: {spread:0.00}\tLR: {learningRate:0.00}\tTime: {s.ElapsedMilliseconds}ms");
+
+            Console.WriteLine($"W0: {network.Weights[0]}");
+            Console.WriteLine($"(Iteration {iteration})\tAvg: {avg:0.00}\tMin: {min:0.00}\tMax {max:0.00}\tSpread: {spread:0.00}\tLR: {learningRate:0.000000}\tTime: {s.ElapsedMilliseconds}ms");
 
             iteration++;
         }

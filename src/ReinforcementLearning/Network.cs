@@ -62,7 +62,7 @@ public class Network
                     var nextNodeArrayIndex = nodeIndex + _layerSizes[layerIndex] + nextNodeIndex;
 
                     // Run activation function on each node in next layer
-                    _nodes[nextNodeArrayIndex] += Activation(_nodes[nodeIndex + currentNodeIndex] * Weights[weightAndBiasIndex] + Biases[weightAndBiasIndex]);
+                    _nodes[nextNodeArrayIndex] += Activation((_nodes[nodeIndex + currentNodeIndex] * Weights[weightAndBiasIndex]) + Biases[weightAndBiasIndex]);
 
                     weightAndBiasIndex++;
                 }
@@ -188,13 +188,17 @@ public class Network
         }
 
         // Update weights and biases based on gradients
-        var gpuData = accelerator.Allocate1D(weightUpdates.Concat(biasUpdates).ToArray());
+        var weightAndBiasUpdates = weightUpdates.Concat(biasUpdates).ToArray();
+        var weightsAndBiases = Weights.Concat(Biases).ToArray();
 
-        var gpuOutput = accelerator.Allocate1D(Weights.Concat(Biases).ToArray());
+        var gpuData = accelerator.Allocate1D(weightAndBiasUpdates);
 
-        var loadedKernel = accelerator.LoadAutoGroupedStreamKernel((Index1D index, ArrayView<double> weightAndBiasUpdates, ArrayView<double> weightsAndBias) =>
+        var gpuOutput = accelerator.Allocate1D(weightsAndBiases);
+
+        var loadedKernel = accelerator.LoadAutoGroupedStreamKernel((Index1D index, ArrayView<double> weightAndBiasUpdatesGpu, ArrayView<double> weightsAndBiasesGpu) =>
         {
-            weightsAndBias[index] += weightAndBiasUpdates[index];
+            // This runs on GPU
+            weightsAndBiasesGpu[index] += weightAndBiasUpdatesGpu[index];
         });
 
         loadedKernel((int)gpuData.Length, gpuData.View, gpuOutput.View);
