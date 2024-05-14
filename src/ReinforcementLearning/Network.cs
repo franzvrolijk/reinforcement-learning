@@ -1,7 +1,5 @@
-﻿using System.Diagnostics;
-using ILGPU;
+﻿using ILGPU;
 using ILGPU.Runtime;
-using ILGPU.Runtime.Cuda;
 
 namespace ReinforcementLearning;
 
@@ -80,8 +78,8 @@ public class Network
 
     public void GradientDescent(Func<double> loss, double learnRate, double delta)
     {
-        var weightGradients = new double[Weights.Length];
-        var biasGradients = new double[Biases.Length];
+        var weightUpdates = new double[Weights.Length];
+        var biasUpdates = new double[Biases.Length];
 
         // Compute gradients of loss function based on change in weights/biases
         var weightAndBiasIndex = 0;
@@ -101,7 +99,7 @@ public class Network
 
                     var derivative = deltaLoss / delta;
 
-                    weightGradients[weightAndBiasIndex] = derivative < 0
+                    weightUpdates[weightAndBiasIndex] = derivative < 0
                         ? learnRate
                         : learnRate * -1; ;
 
@@ -117,7 +115,7 @@ public class Network
 
                     derivative = deltaLoss / delta;
 
-                    biasGradients[weightAndBiasIndex] = derivative < 0
+                    biasUpdates[weightAndBiasIndex] = derivative < 0
                         ? learnRate
                         : learnRate * -1; ;
 
@@ -136,8 +134,8 @@ public class Network
             {
                 for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
                 {
-                    Weights[weightAndBiasIndex] += weightGradients[weightAndBiasIndex];
-                    Biases[weightAndBiasIndex] += biasGradients[weightAndBiasIndex];
+                    Weights[weightAndBiasIndex] += weightUpdates[weightAndBiasIndex];
+                    Biases[weightAndBiasIndex] += biasUpdates[weightAndBiasIndex];
 
                     weightAndBiasIndex++;
                 }
@@ -147,8 +145,8 @@ public class Network
 
     public void GradientDescentGpu(Func<double> loss, double learnRate, double delta, Accelerator accelerator)
     {
-        var weightGradients = new double[Weights.Length];
-        var biasGradients = new double[Biases.Length];
+        var weightUpdates = new double[Weights.Length];
+        var biasUpdates = new double[Biases.Length];
 
         var lossBefore = loss();
 
@@ -168,7 +166,7 @@ public class Network
 
                     var gradient = deltaLoss / delta;
 
-                    weightGradients[weightAndBiasIndex] = gradient < 0 ? learnRate : learnRate * -1;
+                    weightUpdates[weightAndBiasIndex] = gradient < 0 ? learnRate : learnRate * -1;
 
                     Weights[weightAndBiasIndex] -= delta;
 
@@ -180,7 +178,7 @@ public class Network
 
                     gradient = deltaLoss / delta;
 
-                    biasGradients[weightAndBiasIndex] = gradient < 0 ? learnRate : learnRate * -1;
+                    biasUpdates[weightAndBiasIndex] = gradient < 0 ? learnRate : learnRate * -1;
 
                     Biases[weightAndBiasIndex] -= delta;
 
@@ -190,13 +188,13 @@ public class Network
         }
 
         // Update weights and biases based on gradients
-        var gpuData = accelerator.Allocate1D(weightGradients.Concat(biasGradients).ToArray());
+        var gpuData = accelerator.Allocate1D(weightUpdates.Concat(biasUpdates).ToArray());
 
         var gpuOutput = accelerator.Allocate1D(Weights.Concat(Biases).ToArray());
 
-        var loadedKernel = accelerator.LoadAutoGroupedStreamKernel((Index1D index, ArrayView<double>  data, ArrayView<double> output) =>
+        var loadedKernel = accelerator.LoadAutoGroupedStreamKernel((Index1D index, ArrayView<double> weightAndBiasUpdates, ArrayView<double> weightsAndBias) =>
         {
-            output[index] += data[index];
+            weightsAndBias[index] += weightAndBiasUpdates[index];
         });
 
         loadedKernel((int)gpuData.Length, gpuData.View, gpuOutput.View);
