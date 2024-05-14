@@ -1,5 +1,7 @@
-﻿using ILGPU;
+﻿using System.Diagnostics;
+using ILGPU;
 using ILGPU.Runtime;
+using ILGPU.Runtime.Cuda;
 
 namespace ReinforcementLearning;
 
@@ -7,9 +9,9 @@ public class Network
 {
     private readonly double[] _nodes;
 
-    public readonly double[] Weights;
+    public double[] Weights;
 
-    public readonly double[] Biases;
+    public double[] Biases;
 
     private readonly int[] _layerSizes;
 
@@ -202,18 +204,8 @@ public class Network
         accelerator.Synchronize();
 
         var hostOutput = gpuOutput.GetAsArray1D();
-
-        weightAndBiasIndex = 0;
-        for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
-        {
-            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < _layerSizes[layerIndex]; currentLayerNodeIndex++)
-            {
-                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
-                {
-                    Weights[weightAndBiasIndex] = hostOutput[weightAndBiasIndex];
-                    Biases[weightAndBiasIndex] = hostOutput[Weights.Length + weightAndBiasIndex];
-                }
-            }
-        }
+      
+        Buffer.BlockCopy(hostOutput, 0, Weights, 0, Weights.Length * sizeof(double));
+        Buffer.BlockCopy(hostOutput, Weights.Length * sizeof(double), Biases, 0, Biases.Length * sizeof(double));
     }
 }
