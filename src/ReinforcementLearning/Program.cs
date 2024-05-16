@@ -12,7 +12,7 @@ public class Program
         const int trainingIterations = 1000;
         const double initialLearningRate = 0.001d;
         const double learningRateDecay = 0.001d;
-        const double delta = 0.0000001d;
+        const double delta = 0.00000001d;
 
         var testData = Enumerable.Range(0, 10).Select(_ =>
         {
@@ -27,7 +27,7 @@ public class Program
             };
         }).ToList();
 
-        var network = new Network([4, 6, 1], Activation.Sigmoid);
+        var network = new Network([4, 8, 4, 1], Activation.Sigmoid);
         using var context = Context.CreateDefault();
         using var accelerator = context.GetPreferredDevice(false).CreateAccelerator(context);
 
@@ -58,7 +58,7 @@ public class Program
 
                     var loss = 1 - reductionRelativeToOptimal;
 
-                    return loss;
+                    return loss * loss;
 
                 }, learningRate, delta, accelerator);
             }
@@ -86,8 +86,13 @@ public class Program
             var max = scores.Max();
             var (avg, spread) = (scores.Average(), max - min);
 
-            Console.WriteLine($"W0: {network.Weights[0]}");
-            Console.WriteLine($"(Iteration {iteration})\tAvg: {avg:0.00}\tMin: {min:0.00}\tMax {max:0.00}\tSpread: {spread:0.00}\tLR: {learningRate:0.000000}\tTime: {s.ElapsedMilliseconds}ms");
+            if (Console.KeyAvailable)
+            {
+                Console.ReadKey(true);
+                Console.Clear();
+                network.Print();
+                Console.WriteLine($"(Iteration {iteration})\tAvg: {avg:0.00}\tMin: {min:0.00}\tMax {max:0.00}\tSpread: {spread:0.00}\tLR: {learningRate:0.000000}\tTime: {s.ElapsedMilliseconds}ms");
+            }
 
             iteration++;
         }

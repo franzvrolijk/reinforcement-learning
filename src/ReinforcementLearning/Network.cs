@@ -1,4 +1,5 @@
-﻿using ILGPU;
+﻿using System.Text;
+using ILGPU;
 using ILGPU.Runtime;
 
 namespace ReinforcementLearning;
@@ -209,5 +210,30 @@ public class Network
       
         Buffer.BlockCopy(hostOutput, 0, Weights, 0, Weights.Length * sizeof(double));
         Buffer.BlockCopy(hostOutput, Weights.Length * sizeof(double), Biases, 0, Biases.Length * sizeof(double));
+    }
+
+    public void Print()
+    {
+        var weightAndBiasIndex = 0;
+        for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
+        {
+            var stringBuilder = new StringBuilder();
+            stringBuilder.Append($"L{layerIndex}-L{layerIndex + 1}\n");
+            for (var currentLayerNodeIndex = 0; currentLayerNodeIndex < _layerSizes[layerIndex]; currentLayerNodeIndex++)
+            {
+                for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
+                {
+                    stringBuilder.AppendLine();
+                    stringBuilder.Append($"""
+                                         Node {currentLayerNodeIndex} to {nextLayerNodeIndex}
+                                            Weight: {Weights[weightAndBiasIndex]}
+                                            Bias: {Biases[weightAndBiasIndex]}
+                                         """);
+                    weightAndBiasIndex++;
+                }
+            }
+
+            Console.WriteLine(stringBuilder.ToString());
+        }
     }
 }
