@@ -10,7 +10,7 @@ public class Program
     private static void Main()
     {
         const int trainingIterations = 1000;
-        const double initialLearningRate = 0.001d;
+        const double initialLearningRate = 0.1d;
         const double learningRateDecay = 0.001d;
         const double delta = 0.00000001d;
 
@@ -27,7 +27,7 @@ public class Program
             };
         }).ToList();
 
-        var network = new Network([4, 8, 4, 1], Activation.Sigmoid);
+        var network = new Network([4, 16, 8, 1], Activation.LeakyReLU, Activation.Sigmoid);
         using var context = Context.CreateDefault();
         using var accelerator = context.GetPreferredDevice(false).CreateAccelerator(context);
 
@@ -36,11 +36,6 @@ public class Program
         while (true)
         {
             var learningRate = initialLearningRate / (1 + learningRateDecay * iteration);
-            
-            var board = Board.Generate(BoardSize);
-            var normalizedInputs = board.GetNormalizedPositions();
-            var optimalReductionInDistance = board.OptimalReductionInDistance();
-            var preMoveDistance = board.Distance();
 
             var s = Stopwatch.StartNew();
 
@@ -48,6 +43,11 @@ public class Program
             {
                 network.GradientDescentGpu(() =>
                 {
+                    var board = Board.Generate(BoardSize);
+                    var normalizedInputs = board.GetNormalizedPositions();
+                    var optimalReductionInDistance = board.OptimalReductionInDistance();
+                    var preMoveDistance = board.Distance();
+
                     var direction = network.Propagate(normalizedInputs)[0];
 
                     var postMoveDistance = board.DistanceAfterMove(direction);
@@ -65,31 +65,33 @@ public class Program
 
             s.Stop();
 
-            List<double> scores = [];
-
-            for (var i = 0; i < 10; i++)
-            {
-                var testCase = testData[i];
-
-                var direction = network.Propagate(testCase.NormalizedPositions)[0];
-
-                var postMoveDistance = testCase.Board.DistanceAfterMove(direction);
-
-                var reductionInDistance = testCase.PreMoveDistance - postMoveDistance;
-
-                var reductionRelativeToOptimal = reductionInDistance / testCase.OptimalReductionInDistance;
-
-                scores.Add(reductionRelativeToOptimal);
-            }
-
-            var min = scores.Min();
-            var max = scores.Max();
-            var (avg, spread) = (scores.Average(), max - min);
 
             if (Console.KeyAvailable)
             {
                 Console.ReadKey(true);
                 Console.Clear();
+
+                List<double> scores = [];
+
+                for (var i = 0; i < 10; i++)
+                {
+                    var testCase = testData[i];
+
+                    var direction = network.Propagate(testCase.NormalizedPositions)[0];
+
+                    var postMoveDistance = testCase.Board.DistanceAfterMove(direction);
+
+                    var reductionInDistance = testCase.PreMoveDistance - postMoveDistance;
+
+                    var reductionRelativeToOptimal = reductionInDistance / testCase.OptimalReductionInDistance;
+
+                    scores.Add(reductionRelativeToOptimal);
+                }
+
+                var min = scores.Min();
+                var max = scores.Max();
+                var (avg, spread) = (scores.Average(), max - min);
+
                 network.Print();
                 Console.WriteLine($"(Iteration {iteration})\tAvg: {avg:0.00}\tMin: {min:0.00}\tMax {max:0.00}\tSpread: {spread:0.00}\tLR: {learningRate:0.000000}\tTime: {s.ElapsedMilliseconds}ms");
             }

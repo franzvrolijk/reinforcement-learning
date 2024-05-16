@@ -14,6 +14,11 @@ public class Activation
         return 1 / (1 + x);
     }
 
+    public static double LeakyReLU(double value)
+    {
+        return value > 0 ? value : 0.01 * value;
+    }
+
     public static double[] Softmax(double[] values)
     {
         var max = values.Max();

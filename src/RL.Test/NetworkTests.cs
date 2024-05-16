@@ -13,13 +13,16 @@ public class NetworkTests
         double[] weights = [0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5];
         double[] biases = [0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5];
 
-        var network = new Network(layerSizes, x => x * 2, weights, biases);
+        var network = new Network(layerSizes, Activation.Sigmoid, weights, biases);
 
         var result = network.Propagate([1, 1]);
-            
-        double[] expectedOutput = [21, 21];
 
-        result.Should().Equal(expectedOutput);
+        double[] expectedOutput = [0.9492548465650223, 0.9492548465650223];
+
+        for (var i = 0; i < result.Length; i++)
+        {
+            result[i].Should().BeApproximately(expectedOutput[i], 0.000000000000001);
+        }
     }
 
     [Fact]

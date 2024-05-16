@@ -15,12 +15,14 @@ public class Network
     private readonly int[] _layerSizes;
 
     private readonly Func<double, double> _activationFunction;
+    private readonly Func<double, double> _outputActivation;
     private static double RandomWeightValue => 0.01 * Random.Shared.NextDouble() - 0.005;
 
-    public Network(int[] layerSizes, Func<double, double> activationFunction, double[]? weights = null, double[]? biases = null)
+    public Network(int[] layerSizes, Func<double, double> activationFunction, Func<double, double> outputActivation, double[]? weights = null, double[]? biases = null)
     {
         _layerSizes = layerSizes;
         _activationFunction = activationFunction;
+        _outputActivation = outputActivation;
 
         _nodes = new double[_layerSizes.Sum()];
 
@@ -37,10 +39,8 @@ public class Network
 
     public Network Copy()
     {
-        return new(_layerSizes, _activationFunction, Weights.Select(w => w).ToArray(), Biases.Select(b => b).ToArray());
+        return new(_layerSizes, _activationFunction, _outputActivation, Weights.Select(w => w).ToArray(), Biases.Select(b => b).ToArray());
     }
-
-    private double Activation(double x) => _activationFunction(x);
 
     public double[] Propagate(double[] inputs)
     {
@@ -55,19 +55,31 @@ public class Network
         var nodeIndex = 0;
         for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
         {
+            var nextLayerStartIndex = nodeIndex + _layerSizes[layerIndex];
             for (var currentNodeIndex = 0; currentNodeIndex < _layerSizes[layerIndex]; currentNodeIndex++)
             {
                 for (var nextNodeIndex = 0; nextNodeIndex < _layerSizes[layerIndex + 1]; nextNodeIndex++)
                 {
                     // Calculate the index of the next node in the _nodes array
-                    var nextNodeArrayIndex = nodeIndex + _layerSizes[layerIndex] + nextNodeIndex;
+                    var nextNodeArrayIndex = nextLayerStartIndex + nextNodeIndex;
 
-                    // Run activation function on each node in next layer
-                    _nodes[nextNodeArrayIndex] += Activation((_nodes[nodeIndex + currentNodeIndex] * Weights[weightAndBiasIndex]) + Biases[weightAndBiasIndex]);
+                    // Accumulate the weighted sum for each node in the next layer
+                    _nodes[nextNodeArrayIndex] += _nodes[nodeIndex + currentNodeIndex] * Weights[weightAndBiasIndex] + Biases[weightAndBiasIndex];
 
                     weightAndBiasIndex++;
                 }
             }
+
+            var activation = layerIndex == _layerSizes.Length - 2
+                ? _outputActivation
+                : _activationFunction;
+
+            // Apply activation function to each node in the next layer
+            for (var nextNodeIndex = 0; nextNodeIndex < _layerSizes[layerIndex + 1]; nextNodeIndex++)
+            {
+                _nodes[nextLayerStartIndex + nextNodeIndex] = activation(_nodes[nextLayerStartIndex + nextNodeIndex]);
+            }
+
             nodeIndex += _layerSizes[layerIndex];
         }
 
@@ -207,7 +219,7 @@ public class Network
         accelerator.Synchronize();
 
         var hostOutput = gpuOutput.GetAsArray1D();
-      
+
         Buffer.BlockCopy(hostOutput, 0, Weights, 0, Weights.Length * sizeof(double));
         Buffer.BlockCopy(hostOutput, Weights.Length * sizeof(double), Biases, 0, Biases.Length * sizeof(double));
     }
