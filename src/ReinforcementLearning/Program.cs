@@ -1,101 +1,42 @@
 ﻿using ILGPU;
-using System.Diagnostics;
 
 namespace ReinforcementLearning;
 
 public class Program
 {
-    private static readonly (int, int) BoardSize = (10, 10);
-
     private static void Main()
     {
-        const int trainingIterations = 1000;
-        const double initialLearningRate = 0.1d;
-        const double learningRateDecay = 0.001d;
-        const double delta = 0.00000001d;
+        var network = new Network([4, 8, 4, 1], Activation.LeakyReLU, Activation.Sigmoid);
 
-        var testData = Enumerable.Range(0, 10).Select(_ =>
-        {
-            var board = Board.Generate(BoardSize);
+        TrainNetwork(network);
+    }
 
-            return new
-            {
-                Board = board,
-                PreMoveDistance = board.Distance(),
-                OptimalReductionInDistance = board.OptimalReductionInDistance(),
-                NormalizedPositions = board.GetNormalizedPositions()
-            };
-        }).ToList();
-
-        var network = new Network([4, 16, 8, 1], Activation.LeakyReLU, Activation.Sigmoid);
+    private static void TrainNetwork(Network network)
+    {
         using var context = Context.CreateDefault();
         using var accelerator = context.GetPreferredDevice(false).CreateAccelerator(context);
 
-        var iteration = 1;
+        const int trainingIterations = 1000;
+        const double initialLearningRate = 0.001d;
+        const double learningRateDecay = 0.0005d;
+        const double delta = 0.00000001d;
+        const double targetAccuracy = 0.98;
 
-        while (true)
+        var iteration = 1;
+        var trainingComplete = false;
+        
+        while (!trainingComplete)
         {
             var learningRate = initialLearningRate / (1 + learningRateDecay * iteration);
-
-            var s = Stopwatch.StartNew();
 
             for (var i = 0; i < trainingIterations; i++)
             {
                 network.GradientDescentGpu(() =>
                 {
-                    var board = Board.Generate(BoardSize);
-                    var normalizedInputs = board.GetNormalizedPositions();
-                    var optimalReductionInDistance = board.OptimalReductionInDistance();
-                    var preMoveDistance = board.Distance();
-
-                    var direction = network.Propagate(normalizedInputs)[0];
-
-                    var postMoveDistance = board.DistanceAfterMove(direction);
-
-                    var reductionInDistance = preMoveDistance - postMoveDistance;
-
-                    var reductionRelativeToOptimal = reductionInDistance / optimalReductionInDistance;
-
-                    var loss = 1 - reductionRelativeToOptimal;
-
-                    return loss * loss;
-
+                    
+                    return loss;
                 }, learningRate, delta, accelerator);
             }
-
-            s.Stop();
-
-
-            if (Console.KeyAvailable)
-            {
-                Console.ReadKey(true);
-                Console.Clear();
-
-                List<double> scores = [];
-
-                for (var i = 0; i < 10; i++)
-                {
-                    var testCase = testData[i];
-
-                    var direction = network.Propagate(testCase.NormalizedPositions)[0];
-
-                    var postMoveDistance = testCase.Board.DistanceAfterMove(direction);
-
-                    var reductionInDistance = testCase.PreMoveDistance - postMoveDistance;
-
-                    var reductionRelativeToOptimal = reductionInDistance / testCase.OptimalReductionInDistance;
-
-                    scores.Add(reductionRelativeToOptimal);
-                }
-
-                var min = scores.Min();
-                var max = scores.Max();
-                var (avg, spread) = (scores.Average(), max - min);
-
-                network.Print();
-                Console.WriteLine($"(Iteration {iteration})\tAvg: {avg:0.00}\tMin: {min:0.00}\tMax {max:0.00}\tSpread: {spread:0.00}\tLR: {learningRate:0.000000}\tTime: {s.ElapsedMilliseconds}ms");
-            }
-
             iteration++;
         }
     }

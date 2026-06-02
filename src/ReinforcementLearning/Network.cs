@@ -6,7 +6,7 @@ namespace ReinforcementLearning;
 
 public class Network
 {
-    private readonly double[] _nodes;
+    private double[] _nodes;
 
     public double[] Weights;
 
@@ -32,9 +32,88 @@ public class Network
         {
             totalWeightsAndBiases += layerSizes[i] * layerSizes[i + 1];
         }
-
+        
         Weights = weights ?? Enumerable.Range(0, totalWeightsAndBiases).Select(_ => RandomWeightValue).ToArray();
         Biases = biases ?? Enumerable.Range(0, totalWeightsAndBiases).Select(_ => 0.01).ToArray();
+    }
+
+    public void AddNodeToLayer(int layerIndex, double? newWeightValue = null, double? newBiasValue = null)
+    {
+        // Add the node
+        var newNodeIndex = GetNodeIndex(layerIndex, 0);
+
+        var tempNodes = _nodes.ToList();
+        tempNodes.Insert(newNodeIndex, 0);
+        _nodes = tempNodes.ToArray();
+
+        var tempWeights = Weights.ToList();
+        var tempBiases = Biases.ToList();
+
+        _layerSizes[layerIndex]++;
+
+        // Add new weights and biases from back to front, in order to not shift indexes
+        var weightIndexesToAddBetweenPreviousAndCurrentLayer = Enumerable
+            .Range(0, _layerSizes[layerIndex - 1])
+            .Select(i => GetWeightIndex(layerIndex - 1, i, 0))
+            .ToList();
+
+        foreach (var newWeightIndex in weightIndexesToAddBetweenPreviousAndCurrentLayer)
+        {
+            tempWeights.Insert(newWeightIndex, newWeightValue ?? RandomWeightValue);
+            tempBiases.Insert(newWeightIndex, newBiasValue ?? 0.01);
+        }
+
+        var weightIndexesToAddBetweenCurrentAndNextLayer = Enumerable
+            .Range(0, _layerSizes[layerIndex + 1])
+            .Select(i => GetWeightIndex(layerIndex, 0, i))
+            .ToList();
+
+        foreach (var newWeightIndex in weightIndexesToAddBetweenCurrentAndNextLayer)
+        {
+            tempWeights.Insert(newWeightIndex, newWeightValue ?? RandomWeightValue);
+            tempBiases.Insert(newWeightIndex, newBiasValue ?? 0.01);
+        }
+
+        Weights = tempWeights.ToArray();
+        Biases = tempBiases.ToArray();
+    }
+
+    public void RemoveNodeFromLayer(int layerIndex)
+    {
+        // Remove the node
+        var indexToRemove = GetNodeIndex(layerIndex, 0);
+        
+        var tempNodes = _nodes.ToList();
+        tempNodes.RemoveAt(indexToRemove);
+        _nodes = tempNodes.ToArray();
+
+        // Remove node's weights and biases from back to front, in order to not shift indexes
+        var numberOfNodesInPreviousLayer = _layerSizes[layerIndex - 1];
+        var numberOfNodesInNextLayer = _layerSizes[layerIndex + 1];
+
+        var tempWeights = Weights.ToList();
+        var tempBiases = Biases.ToList();
+
+        // Remove weights and biases between node and next layer
+        for (var nodeIndex = numberOfNodesInNextLayer -1; nodeIndex >= 0; nodeIndex--)
+        {
+            var weightIndex = GetWeightIndex(layerIndex, 0, nodeIndex);
+            tempWeights.RemoveAt(weightIndex);
+            tempBiases.RemoveAt(weightIndex);
+        }
+
+        // Remove weights and biases between node and previous layer
+        for (var nodeIndex = numberOfNodesInPreviousLayer - 1; nodeIndex >= 0; nodeIndex--)
+        {
+            var weightIndex = GetWeightIndex(layerIndex - 1, nodeIndex, 0);
+            tempWeights.RemoveAt(weightIndex);
+            tempBiases.RemoveAt(weightIndex);
+        }
+
+        Weights = tempWeights.ToArray();
+        Biases = tempBiases.ToArray();
+
+        _layerSizes[layerIndex]--;
     }
 
     public Network Copy()
@@ -42,13 +121,105 @@ public class Network
         return new(_layerSizes, _activationFunction, _outputActivation, Weights.Select(w => w).ToArray(), Biases.Select(b => b).ToArray());
     }
 
+    public int GetWeightIndex(int fromLayerIndex, int fromNodeIndex, int toNodeIndex)
+    {
+        var toLayerIndex = fromLayerIndex + 1;
+        var nodesInToLayer = _layerSizes[toLayerIndex];
+        
+        var weightsToSkipToGetToLayer = 0;
+
+        for (var i = 0; i < fromLayerIndex; i++)
+        {
+            weightsToSkipToGetToLayer += _layerSizes[i] * _layerSizes[i + 1];
+        }
+
+        var weightsToSkipToGetToNode = 0;
+
+        for (var i = 0; i < fromNodeIndex; i++)
+        {
+            weightsToSkipToGetToNode += nodesInToLayer;
+        }
+
+        return weightsToSkipToGetToLayer + weightsToSkipToGetToNode + toNodeIndex;
+    }
+
+    private int GetNodeIndex(int layerIndex, int nodeIndex)
+    {
+        var index = _layerSizes.Take(layerIndex).Sum() + nodeIndex;
+        return index;
+    }
+
+    public double[] PropagateGpu(double[] inputs, Accelerator accelerator)
+    {
+        Buffer.BlockCopy(inputs, 0, _nodes, 0, inputs.Length * sizeof(double));
+
+        var loadedKernel = accelerator.LoadAutoGroupedStreamKernel((Index1D index, ArrayView<double> gpuData, int numWeights) =>
+        {
+            gpuData[numWeights * 3+ index] = gpuData[numWeights * 2 + index] * gpuData[index] + gpuData[numWeights + index];
+        });
+
+        // Find weight/bias and calculate next layer node's value
+        for (var layerIndex = 0; layerIndex < _layerSizes.Length - 1; layerIndex++)
+        {
+            var currentLayerSize = _layerSizes[layerIndex];
+            var nextLayerSize = _layerSizes[layerIndex + 1];
+            var numWeights = currentLayerSize * nextLayerSize;
+
+            var preAndPostCalcNodeValues = new double[currentLayerSize * nextLayerSize * 2];
+            var currentLayerIndexStart = GetNodeIndex(layerIndex, 0);
+
+            for (var i = 0; i < numWeights; i++)
+            {
+                preAndPostCalcNodeValues[i] = _nodes[currentLayerIndexStart + i % currentLayerSize];
+            }
+
+            var data1D = Weights
+                .Skip(GetNodeIndex(layerIndex, 0))
+                .Take(numWeights)
+                .Concat(Biases
+                    .Skip(GetNodeIndex(layerIndex, 0))
+                    .Take(numWeights))
+                .Concat(preAndPostCalcNodeValues)
+                .ToArray();
+
+            var gpuData = accelerator.Allocate1D(data1D);
+
+            loadedKernel(numWeights, gpuData.View, numWeights);
+
+            accelerator.Synchronize();
+
+            var nextLayerValuesRepeated = gpuData.GetAsArray1D();
+
+            var nextLayerValues = new double[nextLayerSize];
+            for (var i = numWeights * 3; i < nextLayerValuesRepeated.Length; i++)
+            {
+                nextLayerValues[i % nextLayerSize] += nextLayerValuesRepeated[i];
+            }
+
+            var nextLayerStartIndex = GetNodeIndex(layerIndex + 1, 0);
+
+            Buffer.BlockCopy(nextLayerValues, 0, _nodes, nextLayerStartIndex * sizeof(double), nextLayerValues.Length * sizeof(double));
+
+            var activation = layerIndex == _layerSizes.Length - 2
+                ? _outputActivation
+                : _activationFunction;
+
+            // Apply activation function to each node in the next layer
+            for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
+            {
+                _nodes[nextLayerStartIndex + nextLayerNodeIndex] = activation(_nodes[nextLayerStartIndex + nextLayerNodeIndex]);
+            }
+        }
+
+        var nodesBeforeOutput = _nodes.Length - _layerSizes[^1];
+        return _nodes[nodesBeforeOutput..];
+    }
+
     public double[] Propagate(double[] inputs)
     {
-        // Feed inputs to input layer
-        for (var inputIndex = 0; inputIndex < inputs.Length; inputIndex++)
-        {
-            _nodes[inputIndex] = inputs[inputIndex];
-        }
+        _nodes = new double[_nodes.Length];
+
+        Buffer.BlockCopy(inputs, 0, _nodes, 0, inputs.Length * sizeof(double));
 
         // Find weight/bias and calculate next layer node's value
         var weightAndBiasIndex = 0;
@@ -75,9 +246,9 @@ public class Network
                 : _activationFunction;
 
             // Apply activation function to each node in the next layer
-            for (var nextNodeIndex = 0; nextNodeIndex < _layerSizes[layerIndex + 1]; nextNodeIndex++)
+            for (var nextLayerNodeIndex = 0; nextLayerNodeIndex < _layerSizes[layerIndex + 1]; nextLayerNodeIndex++)
             {
-                _nodes[nextLayerStartIndex + nextNodeIndex] = activation(_nodes[nextLayerStartIndex + nextNodeIndex]);
+                _nodes[nextLayerStartIndex + nextLayerNodeIndex] = activation(_nodes[nextLayerStartIndex + nextLayerNodeIndex]);
             }
 
             nodeIndex += _layerSizes[layerIndex];
